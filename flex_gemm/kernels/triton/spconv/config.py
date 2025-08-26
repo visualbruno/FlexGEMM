@@ -2,6 +2,9 @@ import triton
 from ..utils import get_autotune_config
 
 
+allow_tf32 = True
+
+
 autotune_config = get_autotune_config(
     platform={
         'cuda': [

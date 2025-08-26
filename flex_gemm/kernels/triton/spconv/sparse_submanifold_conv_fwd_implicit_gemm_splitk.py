@@ -4,12 +4,12 @@ import triton
 import triton.language as tl
 from ..utils import get_num_sm
 from ....utils.autotuner import triton_autotune, autotune
-from .config import autotune_config
+from . import config
 from .sparse_submanifold_conv_fwd_implicit_gemm import sparse_submanifold_conv_fwd_implicit_gemm_kernel
 
 
 @triton_autotune(
-    configs=autotune_config,
+    configs=config.autotune_config,
     key=['LOGN', 'Ci', 'Co', 'V', 'SPLITK'],
 )
 @triton.jit
@@ -62,14 +62,16 @@ def sparse_submanifold_conv_fwd_implicit_gemm_splitk_kernel(
         v = k // num_k
         bk = k % num_k
         # Calculate pointers to input matrix.
-        neighbor_offset_n = tl.load(neighbor + offset_n * V + v)  # (B1,)
-        mask = neighbor_offset_n != 0xffffffff
-        input_ptr = input + bk * BK + (neighbor_offset_n[:, None] * Ci + offset_k[None, :])  # (B1, BK)
+        neighbor_offset_n = tl.load(neighbor + offset_n * V + v)                                # (B1,)
+        input_ptr = input + bk * BK + (neighbor_offset_n[:, None] * Ci + offset_k[None, :])     # (B1, BK)
         # Load the next block of input and weight.
-        input_block = tl.load(input_ptr, mask=mask[:, None] & (offset_k[None, :] < Co - bk * BK), other=0.0)
-        weight_block = tl.load(weight_ptr, mask=offset_k[:, None] < Co - bk * BK, other=0.0)
+        neigh_mask = neighbor_offset_n != 0xffffffff
+        k_mask = offset_k < Ci - bk * BK
+        input_block = tl.load(input_ptr, mask=neigh_mask[:, None] & k_mask[None, :], other=0.0)
+        weight_block = tl.load(weight_ptr, mask=k_mask[:, None], other=0.0)
         # Accumulate along the K dimension.
-        accumulator = tl.dot(input_block, weight_block, accumulator)  # (B1, B2)
+        accumulator = tl.dot(input_block, weight_block, accumulator,
+                             input_precision='tf32' if config.allow_tf32 else 'ieee')           # (B1, B2)
         # Advance the pointers to the next Ci block.
         weight_ptr += min(BK, Ci - bk * BK)
             

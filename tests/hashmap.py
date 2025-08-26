@@ -46,7 +46,7 @@ def test_hashmap():
         feats, coords, shape = sphere_coords(res, 0)
         for i in range(110):
             torch.cuda.synchronize()
-            torch.cuda.reset_max_memory_allocated()
+            torch.cuda.reset_peak_memory_stats()
             start_insert = time.time()
             try:
                 hashmap = torch.full((4 * coords.shape[0],), 0xffffffff, dtype=torch.uint32, device=coords.device)
@@ -66,7 +66,7 @@ def test_hashmap():
                     raise e
                 
             torch.cuda.synchronize()
-            torch.cuda.reset_max_memory_allocated()
+            torch.cuda.reset_peak_memory_stats()
             start_lookup = time.time()
             try:
                 values_ = kernels.cuda.hashmap_lookup_3d_cuda(hashmap, coords, res, res, res)

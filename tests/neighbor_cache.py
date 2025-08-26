@@ -35,7 +35,7 @@ def benchmark_kernel(kernel_fn, *args, prepare_fn=None, num_warmup=10, num_iters
     # Warmup iterations.
     for _ in range(num_warmup):
         C = kernel_fn(*args, **kwargs)
-    torch.cuda.reset_max_memory_allocated()
+    torch.cuda.reset_peak_memory_stats()
     torch.cuda.synchronize()
     # Timing iterations.
     start = time.time()

@@ -12,8 +12,8 @@ from flex_gemm.ops.spconv import SubMConv3dFunction
 def calc_err(src, ref):
     abs_err = (src - ref).float().abs()
     rel_err = abs_err / torch.clamp_min(ref.float().abs(), 1e-6)
-    err = torch.minimum(abs_err, rel_err).mean()
-    return err
+    err = torch.minimum(abs_err, rel_err)
+    return err.max().item(), err.mean().item()
 
 
 @torch.no_grad()
@@ -39,7 +39,7 @@ def benchmark_kernel(kernel_fn, *args, prepare_fn=None, num_warmup=10, num_iters
     # Warmup iterations.
     for _ in range(num_warmup):
         C = kernel_fn(*args, **kwargs)
-    torch.cuda.reset_max_memory_allocated()
+    torch.cuda.reset_peak_memory_stats()
     torch.cuda.synchronize()
     # Timing iterations.
     start = time.time()
@@ -256,7 +256,7 @@ def test_conv_bwd():
         # 'igemm': (SubMConv3dFunction._sparse_submanifold_conv_backward, igemm_prepare_fn),
         # 'igemmk': (SubMConv3dFunction._sparse_submanifold_conv_backward, igemmk_prepare_fn),
         # 'migemm': (SubMConv3dFunction._sparse_submanifold_conv_backward, migemm_prepare_fn),
-        'migemm_splitk': (SubMConv3dFunction._sparse_submanifold_conv_backward, migemmk_prepare_fn),
+        'migemmk': (SubMConv3dFunction._sparse_submanifold_conv_backward, migemmk_prepare_fn),
     }
     
     reference = (SubMConv3dFunction._sparse_submanifold_conv_backward, egemm_prepare_fn)
@@ -283,7 +283,12 @@ def test_conv_bwd():
         }
 
         config_key = f'RES={RES},C={C}'
-        results[config_key] = []
+        results[config_key] = {
+            'time': [],
+            'memory': [],
+            'err_max': [],
+            'err_mean': [],
+        }
         
         # Benchmark the reference kernel.
         avg_time_ref, memory_ref, C_ref = benchmark_kernel(reference[0], **args, prepare_fn=reference[1])
@@ -291,24 +296,33 @@ def test_conv_bwd():
         # Benchmark each custom kernel.
         for kernel_fn, prepare_fn in kernel_functions.values():
             avg_time, memory, C_kernel = benchmark_kernel(kernel_fn, **args, prepare_fn=prepare_fn)
+            results[config_key]['time'].append(f'{avg_time:.2f} ms ({avg_time_ref/avg_time*100:.1f}%)')
+            results[config_key]['memory'].append(f'{memory:.1f}G')
             if C_kernel is not None:
-                err_rate = calc_err(C_kernel, C_ref)
-                results[config_key].append(f'{avg_time:.2f}/{avg_time_ref/avg_time*100:.1f}%/{err_rate * 1000:.0f}‰/{memory:.1f}G')
+                err_max, err_mean = calc_err(C_kernel, C_ref)
+                results[config_key]['err_max'].append(f'{err_max * 1000:.0f}‰')
+                results[config_key]['err_mean'].append(f'{err_mean * 1000:.0f}‰')
             else:
-                results[config_key].append(f'{avg_time:.2f}/{avg_time_ref/avg_time*100:.1f}%/{memory:.1f}G')
-
+                results[config_key]['err_max'].append('N/A')
+                results[config_key]['err_mean'].append('N/A')
+                
     # Print results as a formatted table.
-    print("\nConv Backward Benchmark Results")
-    print("-" * 180)
-    items = [f'{"settings":<15}']
-    for f in kernel_functions.keys():
-        items.append(f'{f:<20}')
-    print(' | '.join(items))
-    print("-" * 180)
-    for k, v in results.items():
-        items = [f'{k:<15}']
-        items.extend([f'{x:<20}' for x in v])
+    print("=" * 180)
+    print("Conv Backward Benchmark Results")
+    print("=" * 180)
+    for m in ['time','memory', 'err_max', 'err_mean']:
+        print(m.capitalize())
+        print("-" * 180)
+        items = [f'{"settings":<15}']
+        for f in kernel_functions.keys():
+            items.append(f'{f:<20}')
         print(' | '.join(items))
+        print("-" * 180)
+        for k, v in results.items():
+            items = [f'{k:<15}']
+            items.extend([f'{x:<20}' for x in v[m]])
+            print(' | '.join(items))
+        print("-" * 180)
         
 
 if __name__ == "__main__":
