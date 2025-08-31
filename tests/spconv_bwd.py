@@ -113,12 +113,12 @@ def torchsparse_prepare_fn(grad_output: torch.Tensor, feats: torch.Tensor, coord
     
     
 def torchsparse_kernel_fn(input, weight, weight_size, bias, output, grad_output):
-    Co, kD, kH, kW, Ci = weight_size
+    Co, Kw, Kh, Kd, Ci = weight_size
     input.grad = None
     weight.grad = None
     bias.grad = None
     output.backward(grad_output, retain_graph=True)
-    return input.grad, weight.grad.reshape(kW, kH, kD, Ci, Co).permute(4, 2, 1, 0, 3).contiguous(), bias.grad
+    return input.grad, weight.grad.reshape(Kw, Kh, Kd, Ci, Co).permute(4, 2, 1, 0, 3).contiguous(), bias.grad
 
 
 def torch_theory_all_prepare_fn(feats: torch.Tensor, weight: torch.Tensor, **kwargs):
