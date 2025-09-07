@@ -5,6 +5,7 @@ import spconv.pytorch as spconv
 import torchsparse
 import torchsparse.nn
 import torchsparse.nn.functional
+import fvdb
 import flex_gemm
 from flex_gemm.ops.spconv import SubMConv3dFunction
 
@@ -55,7 +56,7 @@ def benchmark_kernel(kernel_fn, *args, prepare_fn=None, num_warmup=10, num_iters
     return avg_time_ms, avg_mem_gb, C
 
 
-def spconv_implicit_gemm_prepare_fn(grad_output: torch.Tensor, feats: torch.Tensor, coords: torch.Tensor, shape: torch.Size, weight: torch.Tensor, bias: torch.Tensor, **kwargs):
+def spconv_prepare_fn(grad_output: torch.Tensor, feats: torch.Tensor, coords: torch.Tensor, shape: torch.Size, weight: torch.Tensor, bias: torch.Tensor, **kwargs):
     Ci, Co = weight.shape[-1], weight.shape[0]
     ksize = (weight.shape[1], weight.shape[2], weight.shape[3])
     
@@ -77,7 +78,7 @@ def spconv_implicit_gemm_prepare_fn(grad_output: torch.Tensor, feats: torch.Tens
     }
     
 
-def spconv_implicit_gemm_kernel_fn(input, weight, bias, output, grad_output):
+def spconv_kernel_fn(input, weight, bias, output, grad_output):
     input.grad = None
     weight.grad = None
     bias.grad = None
@@ -99,7 +100,7 @@ def torchsparse_prepare_fn(grad_output: torch.Tensor, feats: torch.Tensor, coord
     module.bias.data.copy_(bias)
     
     # Init input tensor
-    input_torchsparse = torchsparse.SparseTensor(feats, coords)
+    input_torchsparse = torchsparse.SparseTensor(feats, coords, spatial_range=[shape[0],*shape[-3:]])
     out_torchsparse = module(input_torchsparse)
     
     return {
@@ -119,6 +120,38 @@ def torchsparse_kernel_fn(input, weight, weight_size, bias, output, grad_output)
     bias.grad = None
     output.backward(grad_output, retain_graph=True)
     return input.grad, weight.grad.reshape(Kw, Kh, Kd, Ci, Co).permute(4, 2, 1, 0, 3).contiguous(), bias.grad
+
+
+def fvdb_prepare_fn(feats: torch.Tensor, coords: torch.Tensor, shape: torch.Size, weight: torch.Tensor, bias: torch.Tensor, grad_output: torch.Tensor):
+    Ci, Co = weight.shape[-1], weight.shape[0]
+    ksize = (weight.shape[1], weight.shape[2], weight.shape[3])
+
+    weight = weight.permute(0, 4, 3, 2, 1).contiguous()
+    
+    grid = fvdb.gridbatch_from_ijk(coords[:, 1:].contiguous(), voxel_sizes=0.01)
+    input = grid.jagged_like(feats)
+    sparse_conv_packinfo, out_grid = grid.sparse_conv_kernel_map(kernel_size=ksize, stride=1)
+    sparse_conv_packinfo.build_implicit_gemm(
+        sorted=True, split_mask_num=1, training=True, split_mask_num_bwd=3, use_tf32=True
+    )
+
+    output = sparse_conv_packinfo.sparse_conv_3d(input, weights=weight, backend=fvdb.ConvPackBackend.IGEMM).jflatten().jdata + bias
+
+    return {
+        'input': input.jdata,
+        'weight': weight,
+        'bias': bias,
+        'output': output,
+        'grad_output': grad_output,
+    }
+
+
+def fvdb_kernel_fn(input, weight, bias, output, grad_output):
+    input.grad = None
+    weight.grad = None  
+    bias.grad = None
+    output.backward(grad_output, retain_graph=True)
+    return input.grad, torch.zeros_like(weight), bias.grad
 
 
 def torch_theory_all_prepare_fn(feats: torch.Tensor, weight: torch.Tensor, **kwargs):
@@ -250,8 +283,9 @@ def test_conv_bwd():
     kernel_functions = {
         'torch_all_ref': (torch_theory_kernel_fn, torch_theory_all_prepare_fn),
         'torch_req_ref': (torch_theory_kernel_fn, torch_theory_req_prepare_fn),
-        'spconv': (spconv_implicit_gemm_kernel_fn, spconv_implicit_gemm_prepare_fn),
+        'spconv': (spconv_kernel_fn, spconv_prepare_fn),
         'torchsparse': (torchsparse_kernel_fn, torchsparse_prepare_fn),
+        'fvdb': (fvdb_kernel_fn, fvdb_prepare_fn),
         # 'egemm': (SubMConv3dFunction._sparse_submanifold_conv_backward, egemm_prepare_fn),
         # 'igemm': (SubMConv3dFunction._sparse_submanifold_conv_backward, igemm_prepare_fn),
         # 'igemmk': (SubMConv3dFunction._sparse_submanifold_conv_backward, igemmk_prepare_fn),

@@ -5,6 +5,7 @@ import spconv.pytorch as spconv
 import torchsparse
 import torchsparse.nn
 import torchsparse.nn.functional
+import fvdb
 import flex_gemm
 from flex_gemm.ops.spconv import SubMConv3dFunction
 
@@ -93,7 +94,7 @@ def torchsparse_prepare_fn(feats: torch.Tensor, coords: torch.Tensor, shape: tor
     module.bias.data.copy_(bias)
     
     # Init input tensor
-    input_torchsparse = torchsparse.SparseTensor(feats, coords)
+    input_torchsparse = torchsparse.SparseTensor(feats, coords, spatial_range=[shape[0],*shape[-3:]])
     out_torchsparse = module(input_torchsparse)
     input_torchsparse._caches = out_torchsparse._caches
     
@@ -105,6 +106,32 @@ def torchsparse_prepare_fn(feats: torch.Tensor, coords: torch.Tensor, shape: tor
 
 def torchsparse_kernel_fn(module, input):
     return module(input).feats
+
+
+def fvdb_prepare_fn(feats: torch.Tensor, coords: torch.Tensor, shape: torch.Size, weight: torch.Tensor, bias: torch.Tensor, **kwargs):
+    Ci, Co = weight.shape[-1], weight.shape[0]
+    ksize = (weight.shape[1], weight.shape[2], weight.shape[3])
+
+    weight = weight.permute(0, 4, 3, 2, 1).contiguous()
+    
+    grid = fvdb.gridbatch_from_ijk(coords[:, 1:].contiguous(), voxel_sizes=0.01)
+    input = grid.jagged_like(feats)
+    sparse_conv_packinfo, out_grid = grid.sparse_conv_kernel_map(kernel_size=ksize, stride=1)
+    sparse_conv_packinfo.build_implicit_gemm(
+        sorted=True, split_mask_num=1, training=True, split_mask_num_bwd=3, use_tf32=True
+    )
+
+    return {
+        'input': input,
+        'weight': weight,
+        'bias': bias,
+        'sparse_conv_packinfo': sparse_conv_packinfo,
+    }
+
+
+def fvdb_kernel_fn(input, weight, bias, sparse_conv_packinfo):
+    output = sparse_conv_packinfo.sparse_conv_3d(input, weights=weight, backend=fvdb.ConvPackBackend.IGEMM).jflatten().jdata + bias
+    return output
 
 
 def torch_theory_kernel_fn(A, B, bias):
@@ -222,6 +249,7 @@ def test_conv_fwd():
         'torch_req_ref': (torch_theory_kernel_fn, torch_theory_req_prepare_fn),
         'spconv': (spconv_kernel_fn, spconv_prepare_fn),
         'torchsparse': (torchsparse_kernel_fn, torchsparse_prepare_fn),
+        'fvdb': (fvdb_kernel_fn, fvdb_prepare_fn),
         # 'egemm': (SubMConv3dFunction._sparse_submanifold_conv_forward, egemm_prepare_fn),
         # 'igemm': (SubMConv3dFunction._sparse_submanifold_conv_forward, igemm_prepare_fn),
         # 'igemmk': (SubMConv3dFunction._sparse_submanifold_conv_forward, igemmk_prepare_fn),
