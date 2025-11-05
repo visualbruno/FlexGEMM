@@ -63,8 +63,8 @@ def sparse_submanifold_conv_fwd_implicit_gemm_splitk_kernel(
         v = k // num_k
         bk = k % num_k
         # Calculate pointers to input matrix.
-        neighbor_offset_n = tl.load(neighbor + offset_n * V + v)                                # (B1,)
-        input_ptr = input + bk * BK + (neighbor_offset_n[:, None] * Ci + offset_k[None, :])     # (B1, BK)
+        neighbor_offset_n = tl.load(neighbor + offset_n * V + v).to(tl.int64)                   # (B1,)
+        input_ptr = input + bk * BK + (neighbor_offset_n[:, None].to(tl.int64) * Ci + offset_k[None, :])     # (B1, BK)
         # Load the next block of input and weight.
         neigh_mask = neighbor_offset_n != 0xffffffff
         k_mask = offset_k < Ci - bk * BK

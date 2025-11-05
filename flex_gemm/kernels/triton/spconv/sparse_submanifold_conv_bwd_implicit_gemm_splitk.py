@@ -63,7 +63,7 @@ def sparse_submanifold_conv_bwd_input_implicit_gemm_splitk_kernel(
         bk = k % num_k
         # Calculate pointers to grad_output matrix.
         neighbor_offset_n = tl.load(neighbor + offset_n * V + V - 1 - v)                                    # (B1,)
-        grad_output_ptr = grad_output + bk * BK + (neighbor_offset_n[:, None] * Co + offset_k[None, :])     # (B1, BK)
+        grad_output_ptr = grad_output + bk * BK + (neighbor_offset_n[:, None].to(tl.int64) * Co + offset_k[None, :])     # (B1, BK)
         # Calculate pointers to weight matrix.
         weight_ptr = weight + (((offset_k[:, None] + bk * BK) * V + v) * Ci + offset_ci[None, :])           # (BK, B2)
         # Load the next block of input and weight.
@@ -143,7 +143,7 @@ def sparse_submanifold_conv_bwd_weight_implicit_gemm_splitk_kernel(
         mask = offset_k < N - k * BK
         # Calculate pointers to input matrix.
         input_offset_n = tl.load(neighbor_ptr, mask=mask[:, None], other=0xffffffff)            # (BK, BV)
-        input_ptr = input + (input_offset_n[:, :, None] * Ci + offset_ci[None, None, :])        # (BK, BV, BCi)
+        input_ptr = input + (input_offset_n[:, :, None].to(tl.int64) * Ci + offset_ci[None, None, :])        # (BK, BV, BCi)
         # Load the next block of input and weight.
         grad_output_block = tl.load(grad_output_ptr, mask=mask[None, :], other=0.0)
         input_block = tl.load(input_ptr, mask=input_offset_n[:, :, None] != 0xffffffff, other=0.0).reshape(BK, BV * BCi)
