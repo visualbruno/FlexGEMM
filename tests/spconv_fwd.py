@@ -1,59 +1,13 @@
-import time
 from tqdm import tqdm
 import torch
-import spconv.pytorch as spconv
-import torchsparse
-import torchsparse.nn
-import torchsparse.nn.functional
-import fvdb
+# import spconv.pytorch as spconv
+# import torchsparse
+# import torchsparse.nn
+# import torchsparse.nn.functional
+# import fvdb
 import flex_gemm
 from flex_gemm.ops.spconv import SubMConv3dFunction
-
-
-def calc_err(src, ref):
-    abs_err = (src - ref).float().abs()
-    rel_err = abs_err / torch.clamp_min(ref.float().abs(), 1e-6)
-    err = torch.minimum(abs_err, rel_err)
-    return err.max().item(), err.mean().item()
-
-
-@torch.no_grad()
-def sphere_coords(res, ch, device='cuda', dtype=torch.float):
-    coords = torch.stack(torch.meshgrid(
-        torch.arange(res, device=device),
-        torch.arange(res, device=device),
-        torch.arange(res, device=device),
-        indexing='ij'
-    ), dim=-1).int().contiguous()
-    dist = ((coords.float() - res / 2 + 0.5) ** 2).sum(dim=-1).sqrt()
-    active = (dist <= res / 2) & (dist >= res / 2 - 1.25)
-    coords = torch.nonzero(active).int()
-    coords = torch.cat([torch.zeros(coords.shape[0], 1, device=device, dtype=torch.int32), coords], dim=-1)
-    feats = torch.randn(coords.shape[0], ch, device=device, dtype=dtype)
-    return feats, coords, torch.Size([1, ch, res, res, res])
-
-
-def benchmark_kernel(kernel_fn, *args, prepare_fn=None, num_warmup=10, num_iters=100, **kwargs):
-    if prepare_fn is not None:
-        kwargs = prepare_fn(*args, **kwargs)
-        args = tuple()
-    # Warmup iterations.
-    for _ in range(num_warmup):
-        C = kernel_fn(*args, **kwargs)
-    torch.cuda.reset_peak_memory_stats()
-    torch.cuda.synchronize()
-    # Timing iterations.
-    start = time.time()
-    for _ in range(num_iters):
-        C = kernel_fn(*args, **kwargs)
-    torch.cuda.synchronize()
-    elapsed = time.time() - start
-    memory = torch.cuda.max_memory_allocated() / 1024**3
-    avg_time_ms = (elapsed / num_iters) * 1000.0
-    avg_mem_gb = memory
-    if isinstance(C, tuple):
-        C = torch.cat([c.detach().flatten() for c in C if c is not None], dim=0)
-    return avg_time_ms, avg_mem_gb, C
+from utils import sphere_coords, calc_err, benchmark_kernel
 
 
 def spconv_prepare_fn(feats: torch.Tensor, coords: torch.Tensor, shape: torch.Size, weight: torch.Tensor, bias: torch.Tensor, **kwargs):
@@ -241,19 +195,20 @@ def test_conv_fwd():
         {'RES': 256, 'C': 256},
         {'RES': 512, 'C': 128},
         {'RES': 1024, 'C': 64},
+        {'RES': 2048, 'C': 32},
     ]
     
     # List of custom kernel functions.
     kernel_functions = {
-        'torch_all_ref': (torch_theory_kernel_fn, torch_theory_all_prepare_fn),
-        'torch_req_ref': (torch_theory_kernel_fn, torch_theory_req_prepare_fn),
-        'spconv': (spconv_kernel_fn, spconv_prepare_fn),
-        'torchsparse': (torchsparse_kernel_fn, torchsparse_prepare_fn),
-        'fvdb': (fvdb_kernel_fn, fvdb_prepare_fn),
-        # 'egemm': (SubMConv3dFunction._sparse_submanifold_conv_forward, egemm_prepare_fn),
-        # 'igemm': (SubMConv3dFunction._sparse_submanifold_conv_forward, igemm_prepare_fn),
-        # 'igemmk': (SubMConv3dFunction._sparse_submanifold_conv_forward, igemmk_prepare_fn),
-        # 'migemm': (SubMConv3dFunction._sparse_submanifold_conv_forward, migemm_prepare_fn),
+        # 'torch_all_ref': (torch_theory_kernel_fn, torch_theory_all_prepare_fn),
+        # 'torch_req_ref': (torch_theory_kernel_fn, torch_theory_req_prepare_fn),
+        # 'spconv': (spconv_kernel_fn, spconv_prepare_fn),
+        # 'torchsparse': (torchsparse_kernel_fn, torchsparse_prepare_fn),
+        # 'fvdb': (fvdb_kernel_fn, fvdb_prepare_fn),
+        'egemm': (SubMConv3dFunction._sparse_submanifold_conv_forward, egemm_prepare_fn),
+        'igemm': (SubMConv3dFunction._sparse_submanifold_conv_forward, igemm_prepare_fn),
+        'igemmk': (SubMConv3dFunction._sparse_submanifold_conv_forward, igemmk_prepare_fn),
+        'migemm': (SubMConv3dFunction._sparse_submanifold_conv_forward, migemm_prepare_fn),
         'migemmk': (SubMConv3dFunction._sparse_submanifold_conv_forward, migemmk_prepare_fn),
     }
     

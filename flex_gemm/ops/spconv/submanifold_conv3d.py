@@ -2,7 +2,7 @@ from typing import *
 import torch
 from torch.autograd import Function
 from . import Algorithm
-from .. import spconv
+from .. import spconv, utils
 from ... import kernels
 
 
@@ -42,14 +42,15 @@ class SubMConv3dFunction(Function):
         dilation: Tuple[int, int, int]
     ) -> SubMConv3dNeighborCache:
         assert coords.is_contiguous(), "Coords should be contiguous"
-        hashmap = torch.full((2 * int(spconv.HASHMAP_RATIO * coords.shape[0]),), 0xffffffff, dtype=torch.uint32, device=coords.device)
+        assert coords.dtype in [torch.int32], "Unsupported coords dtype. Expect int32"
         N, C, W, H, D = shape
-        assert N * W * H * D <= 2**32, "Currently, the max number of elements in a tensor is 2^32"
         
+        hashmap_keys, hashmap_vals = utils.init_hashmap(shape, int(spconv.HASHMAP_RATIO * coords.shape[0]), coords.device)
+
         if spconv.ALGORITHM in [Algorithm.EXPLICIT_GEMM, Algorithm.IMPLICIT_GEMM, Algorithm.IMPLICIT_GEMM_SPLITK]:
             if coords.is_cuda:
                 neighbor_map = kernels.cuda.hashmap_build_submanifold_conv_neighbour_map_cuda(
-                    hashmap, coords,
+                    hashmap_keys, hashmap_vals, coords,
                     W, H, D,
                     kernel_size[0], kernel_size[1], kernel_size[2],
                     dilation[0], dilation[1], dilation[2],
@@ -63,7 +64,7 @@ class SubMConv3dFunction(Function):
         elif spconv.ALGORITHM in [Algorithm.MASKED_IMPLICIT_GEMM, Algorithm.MASKED_IMPLICIT_GEMM_SPLITK]:
             if coords.is_cuda:
                 neighbor_map = kernels.cuda.hashmap_build_submanifold_conv_neighbour_map_cuda(
-                    hashmap, coords,
+                    hashmap_keys, hashmap_vals, coords,
                     W, H, D,
                     kernel_size[0], kernel_size[1], kernel_size[2],
                     dilation[0], dilation[1], dilation[2],

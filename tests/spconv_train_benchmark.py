@@ -1,4 +1,3 @@
-import time
 from tqdm import tqdm
 import matplotlib.pyplot as plt
 import numpy as np
@@ -13,58 +12,12 @@ import warpconvnet.nn.modules.sparse_conv as warpconvnet_sparse_conv
 import warpconvnet.geometry.types.voxels as warpconvnet_voxels
 import flex_gemm
 from flex_gemm.ops.spconv import SubMConv3dFunction, sparse_submanifold_conv3d
+from utils import sphere_coords, benchmark_kernel, zero_grad
 
 
+torch.autograd.set_grad_enabled(False)
+DTYPE = torch.float16
 allow_tf32 = True
-
-
-def zero_grad(model_params):
-    for param in model_params:
-       if param.grad is not None:
-            if param.grad.grad_fn is not None:
-                param.grad.detach_()
-            else:
-                param.grad.requires_grad_(False)
-            param.grad.zero_()
-
-
-@torch.no_grad()
-def sphere_coords(res, ch, device='cuda', dtype=torch.float):
-    coords = torch.stack(torch.meshgrid(
-        torch.arange(res, device=device),
-        torch.arange(res, device=device),
-        torch.arange(res, device=device),
-        indexing='ij'
-    ), dim=-1).int().contiguous()
-    dist = ((coords.float() - res / 2 + 0.5) ** 2).sum(dim=-1).sqrt()
-    active = (dist <= res / 2) & (dist >= res / 2 - 1.25)
-    coords = torch.nonzero(active).int()
-    coords = torch.cat([torch.zeros(coords.shape[0], 1, device=device, dtype=torch.int32), coords], dim=-1)
-    feats = torch.randn(coords.shape[0], ch, device=device, dtype=dtype)
-    return feats, coords, torch.Size([1, ch, res, res, res])
-
-
-def benchmark_kernel(kernel_fn, *args, prepare_fn=None, num_warmup=2, num_iters=20, **kwargs):
-    if prepare_fn is not None:
-        kwargs = prepare_fn(*args, **kwargs)
-        args = tuple()
-    # Warmup iterations.
-    for _ in range(num_warmup):
-        C = kernel_fn(*args, **kwargs)
-    torch.cuda.reset_peak_memory_stats()
-    torch.cuda.synchronize()
-    # Timing iterations.
-    start = time.time()
-    for _ in range(num_iters):
-        C = kernel_fn(*args, **kwargs)
-    torch.cuda.synchronize()
-    elapsed = time.time() - start
-    memory = torch.cuda.max_memory_allocated() / 1024**3
-    avg_time_ms = (elapsed / num_iters) * 1000.0
-    avg_mem_gb = memory
-    if isinstance(C, tuple):
-        C = torch.cat([c.detach().flatten() for c in C if c is not None], dim=0)
-    return avg_time_ms, avg_mem_gb, C
 
 
 def spconv_prepare_fn(feats: torch.Tensor, coords: torch.Tensor, shape: torch.Size, RES, C, L):
@@ -232,7 +185,7 @@ def test_conv_fwd():
         RES, C, L = c['RES'], c['C'], c['L']
 
         # Create random input matrices.
-        feats, coords, shape = sphere_coords(RES, C, dtype=torch.float32)
+        feats, coords, shape = sphere_coords(RES, C, dtype=DTYPE)
         args = {
             'feats': feats,
             'coords': coords,

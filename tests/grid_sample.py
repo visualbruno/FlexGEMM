@@ -2,31 +2,8 @@ import time
 import math
 from tqdm import tqdm
 import torch
-import flex_gemm
 from flex_gemm.ops.grid_sample import grid_sample_3d_torch, grid_sample_3d
-
-
-def calc_err(src, ref):
-    abs_err = (src - ref).float().abs()
-    rel_err = abs_err / torch.clamp_min(ref.float().abs(), 1e-6)
-    err = torch.minimum(abs_err, rel_err)
-    return err.max().item(), err.mean().item()
-
-
-@torch.no_grad()
-def sphere_coords(res, ch, device='cuda', dtype=torch.float):
-    coords = torch.stack(torch.meshgrid(
-        torch.arange(res, device=device),
-        torch.arange(res, device=device),
-        torch.arange(res, device=device),
-        indexing='ij'
-    ), dim=-1).int().contiguous()
-    dist = ((coords.float() - res / 2 + 0.5) ** 2).sum(dim=-1).sqrt()
-    active = (dist <= res / 2) & (dist >= res / 2 - 1.25)
-    coords = torch.nonzero(active).int()
-    coords = torch.cat([torch.zeros(coords.shape[0], 1, device=device, dtype=torch.int32), coords], dim=-1)
-    feats = torch.randn(coords.shape[0], ch, device=device, dtype=dtype)
-    return feats, coords, torch.Size([1, ch, res, res, res])
+from utils import sphere_coords, calc_err
 
 
 @torch.no_grad()
@@ -169,14 +146,15 @@ def grid_sample_3d_trilinear_bwd(grad_out, out, feats):
 def test(kernel_functions, reference, title):
     # Matrix dimensions.
     config = [
-        {'RES': 8, 'C': 1024},
-        {'RES': 16, 'C': 512},
-        {'RES': 32, 'C': 256},
-        {'RES': 64, 'C': 128},
-        {'RES': 128, 'C': 64},
-        {'RES': 256, 'C': 32},
-        {'RES': 512, 'C': 16},
-        {'RES': 1024, 'C': 8},
+        {'RES': 8, 'C': 2048},
+        {'RES': 16, 'C': 1024},
+        {'RES': 32, 'C': 512},
+        {'RES': 64, 'C': 256},
+        {'RES': 128, 'C': 128},
+        {'RES': 256, 'C': 64},
+        {'RES': 512, 'C': 32},
+        {'RES': 1024, 'C': 16},
+        {'RES': 2048, 'C': 8},
     ]
     
     results = {}

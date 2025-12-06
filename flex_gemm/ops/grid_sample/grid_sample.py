@@ -1,7 +1,7 @@
 from typing import *
 import torch
 from torch.autograd import Function
-from .. import grid_sample
+from .. import grid_sample, utils
 from ... import kernels
 
 
@@ -36,9 +36,9 @@ class GridSample3dFunction(Function):
         B, L = query_pts.shape[:2]
         C, W, H, D = shape[-4:]
         
-        hashmap = torch.full((2 * int(grid_sample.HASHMAP_RATIO * coords.shape[0]),), 0xffffffff, dtype=torch.uint32, device=coords.device)
+        hashmap_keys, hashmap_vals = utils.init_hashmap(shape, int(grid_sample.HASHMAP_RATIO * coords.shape[0]), coords.device)
         indices = kernels.cuda.hashmap_build_grid_sample_3d_nearest_neighbor_map(
-            hashmap,
+            hashmap_keys, hashmap_vals,
             coords.int(),
             query_pts,
             W, H, D
@@ -102,9 +102,9 @@ class GridSample3dFunction(Function):
         B, L = query_pts.shape[:2]
         C, W, H, D = shape[-4:]
         
-        hashmap = torch.full((2 * int(grid_sample.HASHMAP_RATIO * coords.shape[0]),), 0xffffffff, dtype=torch.uint32, device=coords.device)
+        hashmap_keys, hashmap_vals = utils.init_hashmap(shape, int(grid_sample.HASHMAP_RATIO * coords.shape[0]), coords.device)
         indices, weight = kernels.cuda.hashmap_build_grid_sample_3d_trilinear_neighbor_map_weight(
-            hashmap,
+            hashmap_keys, hashmap_vals,
             coords.int(),
             query_pts,
             W, H, D
