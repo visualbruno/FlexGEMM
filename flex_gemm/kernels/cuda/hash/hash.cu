@@ -26,7 +26,7 @@ static __global__ void hashmap_insert_cuda_kernel(
 
 
 template<typename K, typename V>
-void dispatch_hashmap_insert_cuda(
+static void dispatch_hashmap_insert_cuda(
     torch::Tensor& hashmap_keys,
     torch::Tensor& hashmap_values,
     const torch::Tensor& keys,
@@ -105,7 +105,7 @@ static __global__ void hashmap_lookup_cuda_kernel(
 
 
 template<typename K, typename V>
-void dispatch_hashmap_lookup_cuda(
+static void dispatch_hashmap_lookup_cuda(
     const torch::Tensor& hashmap_keys,
     const torch::Tensor& hashmap_values,
     const torch::Tensor& keys,
@@ -198,7 +198,7 @@ static __global__ void hashmap_insert_3d_cuda_kernel(
 
 
 template<typename K, typename V>
-void dispatch_hashmap_insert_3d_cuda(
+static void dispatch_hashmap_insert_3d_cuda(
     torch::Tensor& hashmap_keys,
     torch::Tensor& hashmap_values,
     const torch::Tensor& coords,
@@ -296,7 +296,7 @@ static __global__ void hashmap_lookup_3d_cuda_kernel(
 
 
 template<typename K, typename V>
-void dispatch_hashmap_lookup_3d_cuda(
+static void dispatch_hashmap_lookup_3d_cuda(
     const torch::Tensor& hashmap_keys,
     const torch::Tensor& hashmap_values,
     const torch::Tensor& coords,
@@ -389,7 +389,7 @@ static __global__ void hashmap_insert_3d_idx_as_val_cuda_kernel(
 
 
 template<typename K, typename V>
-void dispatch_hashmap_insert_3d_idx_as_val_cuda(
+static void dispatch_hashmap_insert_3d_idx_as_val_cuda(
     torch::Tensor& hashmap_keys,
     torch::Tensor& hashmap_values,
     const torch::Tensor& coords,
