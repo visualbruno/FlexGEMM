@@ -43,7 +43,7 @@ def sparse_submanifold_conv_fwd_implicit_gemm_kernel(
     
     # Create pointers for submatrices of A and B.
     num_k = tl.cdiv(Ci, BK)  # Number of blocks in K dimension
-    offset_n = (block_id_n * B1 + tl.arange(0, B1)) % N         # (B1,)
+    offset_n = (block_id_n.to(tl.int64) * B1 + tl.arange(0, B1)) % N         # (B1,)
     offset_co = (block_id_co * B2 + tl.arange(0, B2)) % Co      # (B2,)
     offset_k = tl.arange(0, BK)                                 # (BK,)
     
@@ -58,7 +58,7 @@ def sparse_submanifold_conv_fwd_implicit_gemm_kernel(
         v = k // num_k
         bk = k % num_k
         # Calculate pointers to input matrix.
-        neighbor_offset_n = tl.load(neighbor + offset_n * V + v)                                # (B1,)
+        neighbor_offset_n = tl.load(neighbor + offset_n.to(tl.int64) * V + v)                                # (B1,)
         input_ptr = input + bk * BK + (neighbor_offset_n[:, None].to(tl.int64) * Ci + offset_k[None, :])     # (B1, BK)
         # Load the next block of input and weight.
         neigh_mask = neighbor_offset_n != 0xffffffff
@@ -78,7 +78,7 @@ def sparse_submanifold_conv_fwd_implicit_gemm_kernel(
         c += bias_block[None, :]
                 
     # Write back the block of the output matrix with masks.
-    out_offset_n = block_id_n * B1 + tl.arange(0, B1)
+    out_offset_n = block_id_n.to(tl.int64) * B1 + tl.arange(0, B1)
     out_offset_co = block_id_co * B2 + tl.arange(0, B2)
     out_ptr = output + (out_offset_n[:, None] * Co + out_offset_co[None, :])
     out_mask = (out_offset_n[:, None] < N) & (out_offset_co[None, :] < Co)
